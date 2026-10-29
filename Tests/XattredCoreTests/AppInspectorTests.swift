@@ -4,11 +4,16 @@ import XattredCore
 
 final class AppInspectorTests {
     private var fixture: URL!
+    private var watched: URL!
 
     func setUpWithError() throws {
-        let root = AppInspector.projectRoot.appendingPathComponent(".tmp/tests", isDirectory: true)
+        let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let root = project.appendingPathComponent(".tmp/tests", isDirectory: true)
         fixture = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+        watched = fixture.appendingPathComponent("Applications", isDirectory: true)
+        try FileManager.default.createDirectory(at: watched, withIntermediateDirectories: false)
     }
 
     func tearDownWithError() throws {
@@ -72,10 +77,13 @@ final class AppInspectorTests {
         XCTAssertTrue(hasAttribute("app.xattred.test", on: target))
     }
 
-    func testOnlyFixedInboxIsAccepted() throws {
-        try AppInspector.validateInbox(AppInspector.inbox)
-        XCTAssertThrowsError(try AppInspector.validateInbox(AppInspector.projectRoot))
-        XCTAssertThrowsError(try AppInspector.validateInbox(fixture))
+    func testWatchDirectoryValidation() throws {
+        try AppInspector.validateWatchDirectory(watched)
+        let link = fixture.appendingPathComponent("LinkedDirectory")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: watched)
+        XCTAssertThrowsError(try AppInspector.validateWatchDirectory(link))
+        XCTAssertThrowsError(try AppInspector.validateWatchDirectory(fixture.appendingPathComponent("missing")))
+        XCTAssertEqual(AppInspector.applications.path, "/Applications") // No filesystem access.
     }
 
     func testFingerprintDetectsCopyChanges() throws {
@@ -86,20 +94,20 @@ final class AppInspectorTests {
         XCTAssertNotEqual(original, try AppInspector.fingerprint(app))
     }
 
-    func testInboxSkipsSymbolicLinks() throws {
+    func testWatchDirectorySkipsSymbolicLinks() throws {
         let app = try makeApp()
-        let link = AppInspector.inbox.appendingPathComponent("Test-\(UUID().uuidString).app")
+        let link = watched.appendingPathComponent("Test-\(UUID().uuidString).app")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: app)
         defer { try? FileManager.default.removeItem(at: link) }
-        XCTAssertFalse(try AppInspector.inboxApps().contains(link))
+        XCTAssertFalse(try AppInspector.apps(in: watched).contains(link))
     }
 
     func testLiveWatcherDetectsNewQuarantinedApp() throws {
         let app = try makeApp()
         try setAttribute("com.apple.quarantine", on: app)
-        let destination = AppInspector.inbox.appendingPathComponent("Test-\(UUID().uuidString).app")
+        let destination = watched.appendingPathComponent("Test-\(UUID().uuidString).app")
         let detected = DispatchSemaphore(value: 0)
-        let watcher = InboxWatcher(onApp: { url in
+        let watcher = ApplicationWatcher(directory: watched, settleInterval: 0.1, onApp: { url in
             if url.path == destination.path { detected.signal() }
         }, onError: { message in
             print("Watcher error: \(message)")
@@ -111,8 +119,60 @@ final class AppInspectorTests {
         }
         try FileManager.default.moveItem(at: app, to: destination)
         XCTAssertTrue(detected.wait(timeout: .now() + 15) == .success)
-        XCTAssertTrue(detected.wait(timeout: .now() + 4) == .timedOut)
+        XCTAssertTrue(detected.wait(timeout: .now() + 0.5) == .timedOut)
         XCTAssertTrue(AppInspector.isQuarantined(destination)) // Detection never clears anything.
+    }
+
+    func testReplacementOfExistingAppIsDetected() throws {
+        let original = try makeApp("Original.app")
+        try setAttribute("com.apple.quarantine", on: original)
+        let destination = watched.appendingPathComponent("Installed.app")
+        try FileManager.default.moveItem(at: original, to: destination)
+        let detected = DispatchSemaphore(value: 0)
+        let watcher = ApplicationWatcher(directory: watched, settleInterval: 0.1,
+                                         onApp: { _ in detected.signal() }, onError: { print($0) })
+        try watcher.start()
+        defer { watcher.stop() }
+        XCTAssertTrue(detected.wait(timeout: .now() + 0.5) == .timedOut)
+        let replacement = try makeApp("Replacement.app")
+        try setAttribute("com.apple.quarantine", on: replacement)
+        try FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: replacement, to: destination)
+        XCTAssertTrue(detected.wait(timeout: .now() + 5) == .success)
+        XCTAssertTrue(detected.wait(timeout: .now() + 0.5) == .timedOut)
+    }
+
+    func testNonQuarantinedAppWaitsForLateQuarantine() throws {
+        let app = try makeApp()
+        let destination = watched.appendingPathComponent("Late.app")
+        let detected = DispatchSemaphore(value: 0)
+        let watcher = ApplicationWatcher(directory: watched, settleInterval: 0.1,
+                                         onApp: { _ in detected.signal() }, onError: { print($0) })
+        try watcher.start()
+        defer { watcher.stop() }
+        try FileManager.default.moveItem(at: app, to: destination)
+        XCTAssertTrue(detected.wait(timeout: .now() + 0.5) == .timedOut)
+        // Attribute changes inside a new bundle need not emit another parent directory event.
+        try setAttribute("com.apple.quarantine", on: destination)
+        XCTAssertTrue(detected.wait(timeout: .now() + 5) == .success)
+    }
+
+    func testCopyMustSettleBeforePrompt() throws {
+        let app = try makeApp()
+        let destination = watched.appendingPathComponent("Copying.app")
+        try setAttribute("com.apple.quarantine", on: app)
+        let detected = DispatchSemaphore(value: 0)
+        let watcher = ApplicationWatcher(directory: watched, settleInterval: 0.2,
+                                         onApp: { _ in detected.signal() }, onError: { print($0) })
+        try watcher.start()
+        defer { watcher.stop() }
+        try FileManager.default.moveItem(at: app, to: destination)
+        for index in 0..<12 {
+            try Data(repeating: UInt8(index), count: index + 1)
+                .write(to: destination.appendingPathComponent("Contents/payload"))
+            XCTAssertTrue(detected.wait(timeout: .now() + 0.05) == .timedOut)
+        }
+        XCTAssertTrue(detected.wait(timeout: .now() + 5) == .success)
     }
 }
 
@@ -139,10 +199,13 @@ struct TestRunner {
             ("recursive clear and safe path arguments", suite.testClearsAllAttributesRecursivelyAndHandlesShellCharacters),
             ("reject non-app and symlink", suite.testRejectsNonAppAndSymlinkApp),
             ("preserve symlink targets", suite.testRecursiveClearDoesNotFollowBundleSymlinks),
-            ("restrict Inbox path", suite.testOnlyFixedInboxIsAccepted),
+            ("validate watch path and production default", suite.testWatchDirectoryValidation),
             ("detect copy changes", suite.testFingerprintDetectsCopyChanges),
-            ("skip Inbox symlinks", suite.testInboxSkipsSymbolicLinks),
-            ("live watcher detects once without clearing", suite.testLiveWatcherDetectsNewQuarantinedApp)
+            ("skip watch directory symlinks", suite.testWatchDirectorySkipsSymbolicLinks),
+            ("live watcher detects once without clearing", suite.testLiveWatcherDetectsNewQuarantinedApp),
+            ("ignore existing app; detect replacement", suite.testReplacementOfExistingAppIsDetected),
+            ("skip non-quarantined app; detect late quarantine", suite.testNonQuarantinedAppWaitsForLateQuarantine),
+            ("wait for copy to settle", suite.testCopyMustSettleBeforePrompt)
         ]
         for (name, test) in cases {
             try suite.setUpWithError()

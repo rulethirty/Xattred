@@ -3,27 +3,26 @@ import Foundation
 
 public enum XattredError: LocalizedError {
     case invalidApp
-    case unsafeInbox
+    case unsafeDirectory
     case commandFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .invalidApp: "Choose a real .app directory, not a symbolic link."
-        case .unsafeInbox: "Automatic detection is restricted to the project’s Inbox. Symbolic links are not allowed."
+        case .unsafeDirectory: "The watch location must be an existing directory, without symbolic links."
         case .commandFailed(let message): message
         }
     }
 }
 
 public enum AppInspector {
-    // Deliberately fixed: never infer installation folders or watch the home directory.
-    public static let projectRoot = URL(fileURLWithPath: "/Users/user/Documents/xattred", isDirectory: true)
-    public static let inbox = projectRoot.appendingPathComponent("Inbox", isDirectory: true)
+    public static let applications = URL(fileURLWithPath: "/Applications", isDirectory: true)
 
-    public static func validateInbox(_ url: URL) throws {
-        guard url.standardizedFileURL == inbox,
-              url.resolvingSymlinksInPath().standardizedFileURL == inbox else {
-            throw XattredError.unsafeInbox
+    public static func validateWatchDirectory(_ url: URL) throws {
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true,
+              url.resolvingSymlinksInPath().path == url.standardizedFileURL.path else {
+            throw XattredError.unsafeDirectory
         }
     }
 
@@ -40,15 +39,21 @@ public enum AppInspector {
         }
     }
 
-    /// Only direct app children of the fixed, non-symlinked Inbox are considered.
-    public static func inboxApps() throws -> [URL] {
-        try validateInbox(inbox)
+    /// Only direct app children are considered; no symlink traversal.
+    public static func apps(in directory: URL) throws -> [URL] {
+        try validateWatchDirectory(directory)
         return try FileManager.default.contentsOfDirectory(
-            at: inbox, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ).filter {
             (try? validateApp($0)) != nil && $0.resolvingSymlinksInPath().path == $0.standardizedFileURL.path
         }.sorted { $0.path < $1.path }
+    }
+
+    /// Cheap generation key: catches replacement at the same path, including Finder copies.
+    public static func generation(of url: URL) throws -> String {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return "\(attributes[.systemFileNumber] ?? ""):\(attributes[.creationDate] ?? ""):\(attributes[.modificationDate] ?? "")"
     }
 
     /// Copy-settling heuristic. Does not follow symlinks inside app bundles.

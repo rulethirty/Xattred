@@ -19,7 +19,7 @@ xattr -cr /Applications/Xattred.app
 
 Choose **Choose App…**, select an app you trust, and enable **Clear extended attributes**. Settings include open at login, hiding the menu-bar icon, and a configurable GitHub repository link. Reopen Xattred in Finder to reach settings when hidden. No repository URL was supplied, so the GitHub button stays disabled until configured.
 
-**Nothing outside `/Users/user/Documents/xattred/Inbox` is watched.** New quarantined apps placed directly there trigger review after two stable scans. Existing apps are ignored on launch. Copy detection is a heuristic (up to six minutes of settling checks); use manual selection after longer copies. Manual selection inspects only the selected app and never adds watches. The Inbox path is deliberately fixed to this project.
+**Keep Xattred running, then copy a downloaded app directly into `/Applications`.** New or replaced quarantined apps trigger a review after two stable scans (normally about six seconds). Only `/Applications` is watched—not Downloads, your home folder, or the project Inbox. macOS has no “without Apple ID” flag; detection uses quarantine, not signing or Apple ID status. Apps already present at launch or without quarantine do not trigger; use **Choose App…** for those. Copy settling is a heuristic with up to six minutes of retries; use manual selection after longer copies. Tests and `--smoke-test` use project-local folders only.
 
 **Caution:** clearing runs `xattr -crs` (recursive clear, without following symlinks). It permanently removes **all** extended attributes, including quarantine; it does not make software safe. No automatic changes, admin escalation, or automatic app launching. Permission errors may leave attributes partially cleared.
 

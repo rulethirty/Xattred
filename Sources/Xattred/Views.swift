@@ -136,10 +136,10 @@ struct SettingsView: View {
             .toggleStyle(.switch).tint(.primary)
             Divider()
             VStack(alignment: .leading, spacing: 8) {
-                Label("Project-local detection only", systemImage: "folder.badge.gearshape").font(.headline)
-                Text(AppInspector.inbox.path).font(.caption.monospaced()).textSelection(.enabled)
+                Label("Automatic app detection", systemImage: "folder.badge.gearshape").font(.headline)
+                Text(AppInspector.applications.path).font(.caption.monospaced()).textSelection(.enabled)
                 Text(model.watcherMessage).font(.caption).foregroundStyle(.secondary)
-                Text("New quarantined apps here are reviewed after two stable scans. Nothing outside this Inbox is watched. Apps already here at launch are ignored; use Choose App to review them.")
+                Text("Keep Xattred running, then copy a downloaded app directly into /Applications. Quarantined apps trigger a review after copying settles. Apps already present at launch or without quarantine do not trigger; use Choose App for those. No other folders are watched.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Divider()

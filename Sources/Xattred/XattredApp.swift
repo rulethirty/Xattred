@@ -19,7 +19,7 @@ final class AppModel: ObservableObject {
     @Published var isWorking = false
     @Published var succeeded = false
     @Published var error: String?
-    @Published var watcherMessage = "Watching only the project’s Inbox."
+    @Published var watcherMessage = "Starting automatic detection…"
     @Published var loginEnabled = SMAppService.mainApp.status == .enabled
     @Published var loginMessage: String?
     @Published var hideMenuIcon = UserDefaults.standard.bool(forKey: "hideMenuIcon") {
@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var promptWindow: NSWindow?
-    private var watcher: InboxWatcher?
+    private var watcher: ApplicationWatcher?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -129,7 +129,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model.showPrompt = { [weak self] in self?.presentPrompt() }
         model.closePrompt = { [weak self] in self?.promptWindow?.orderOut(nil) }
         updateStatusItem()
-        let watcher = InboxWatcher(
+        // A smoke test never starts a production watcher outside the project.
+        let watchDirectory = smokeTest
+            ? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Inbox", isDirectory: true)
+            : AppInspector.applications
+        let watcher = ApplicationWatcher(
+            directory: watchDirectory,
             onApp: { [weak self] url in
                 Task { @MainActor in self?.model.enqueue(url) }
             },
@@ -138,7 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         )
         self.watcher = watcher
-        do { try watcher.start() }
+        do {
+            try watcher.start()
+            model.watcherMessage = "Watching \(watchDirectory.path) for newly copied quarantined apps."
+        }
         catch { model.watcherMessage = "Detection paused: \(error.localizedDescription)" }
         if smokeTest {
             showSettings()
@@ -183,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         item.button?.toolTip = "Xattred"
         let menu = NSMenu()
         addItem("Choose App…", action: #selector(chooseApp), key: "o", to: menu)
-        addItem("Open Project Inbox", action: #selector(openInbox), key: "", to: menu)
+        addItem("Open Applications", action: #selector(openApplications), key: "", to: menu)
         menu.addItem(.separator())
         addItem("Settings…", action: #selector(showSettings), key: ",", to: menu)
         menu.addItem(.separator())
@@ -199,9 +208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func chooseApp() { model.chooseApp() }
-    @objc private func openInbox() {
-        guard (try? AppInspector.validateInbox(AppInspector.inbox)) != nil else { return }
-        NSWorkspace.shared.open(AppInspector.inbox)
+    @objc private func openApplications() {
+        NSWorkspace.shared.open(AppInspector.applications)
     }
     @objc private func quit() { NSApp.terminate(nil) }
 
