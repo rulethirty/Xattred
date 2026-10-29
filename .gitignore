@@ -1,0 +1,8 @@
+.build/
+.cache/
+.tmp/
+dist/
+Inbox/*
+!Inbox/.gitkeep
+.DS_Store
+*.log

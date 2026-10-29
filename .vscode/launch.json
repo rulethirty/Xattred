@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xattred}",
+            "name": "Debug Xattred",
+            "target": "Xattred",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Xattred"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xattred}",
+            "name": "Release Xattred",
+            "target": "Xattred",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Xattred"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xattred}",
+            "name": "Debug XattredCoreTests",
+            "target": "XattredCoreTests",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug XattredCoreTests"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xattred}",
+            "name": "Release XattredCoreTests",
+            "target": "XattredCoreTests",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release XattredCoreTests"
+        }
+    ]
+}
